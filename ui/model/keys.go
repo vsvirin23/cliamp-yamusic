@@ -339,7 +339,7 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 			m.openJumpMode()
 		case "J":
 			return m.switchToProvider("jellyfin")
-		case "x":
+		case "ctrl+x":
 			m.toggleExpandPlaylist()
 		}
 		return nil
@@ -714,7 +714,7 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 			m.restorePanelWidth()
 		}
 
-	case "x":
+	case "ctrl+x":
 		if m.focus == focusPlaylist {
 			m.toggleExpandPlaylist()
 		}

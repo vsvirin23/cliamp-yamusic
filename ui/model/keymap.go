@@ -50,7 +50,7 @@ var keymapEntries = []keymapEntry{
 	{"p", "Playlist manager"},
 	{"i", "Track info / metadata"},
 	{"Ctrl+S", "Save/download track to ~/Music"},
-	{"x", "Expand/collapse playlist"},
+	{"Ctrl+X", "Expand/collapse playlist"},
 	{"/", "Search playlist"},
 	{"f", "Find on YouTube (queue play next)"},
 	{"Ctrl+F", "Find on SoundCloud (queue play next)"},
@@ -126,7 +126,7 @@ func (m *Model) handleKeymapKey(msg tea.KeyPressMsg) tea.Cmd {
 		}
 		return nil
 
-	case "x":
+	case "ctrl+x":
 		m.toggleExpandPlaylist()
 		return nil
 
