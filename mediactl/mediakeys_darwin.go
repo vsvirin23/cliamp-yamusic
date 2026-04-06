@@ -73,6 +73,11 @@ type darwinMediaKeys struct {
 }
 
 func init() {
+	// Pin the main goroutine to OS thread 1 before the Go scheduler
+	// can migrate it. macOS requires MPRemoteCommandCenter and
+	// CFRunLoop work to happen on the actual main thread.
+	runtime.LockOSThread()
+
 	Register(newDarwinMediaKeys)
 }
 
@@ -81,7 +86,8 @@ func newDarwinMediaKeys(sendFn func(interface{})) (Controller, error) {
 	darwinSend = sendFn
 	darwinMu.Unlock()
 
-	C.MediaKeysInit()
+	// MediaKeysInit is deferred to RunMainLoop so it executes on the
+	// main OS thread where the CFRunLoop will run.
 	return &darwinMediaKeys{}, nil
 }
 
@@ -137,11 +143,12 @@ func (d *darwinMediaKeys) Close() {
 	darwinMu.Unlock()
 }
 
-// RunMainLoop pumps the CoreFoundation run loop on the main OS thread
-// so that MPRemoteCommandCenter events are delivered. It blocks until
-// done is closed.
+// RunMainLoop registers MPRemoteCommandCenter handlers and pumps the
+// CoreFoundation run loop on the main OS thread so that media key
+// events are delivered. It blocks until done is closed.
 func (d *darwinMediaKeys) RunMainLoop(done <-chan struct{}) {
-	runtime.LockOSThread()
+	// init() already locked this goroutine to the main OS thread.
+	C.MediaKeysInit()
 	go func() {
 		<-done
 		C.CFRunLoopStop(C.CFRunLoopGetMain())
