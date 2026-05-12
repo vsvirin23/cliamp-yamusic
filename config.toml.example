@@ -102,6 +102,18 @@ eq = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 # cookies_from = "firefox"   # chrome, brave, edge, opera, safari, vivaldi…
 
 # ---
+# Yandex Music (optional, opt-in)
+# Requires an OAuth access token. Get one using the browser extension:
+# - Chrome: https://chrome.google.com/webstore/detail/yandex-music-token/lcbjeookjibfhjjopieifgjnhlegmkib
+# - Firefox: https://addons.mozilla.org/en-US/firefox/addon/yandex-music-token/
+# Paste the token below. Alternatively, set cookies_from to a browser name
+# to extract the session via yt-dlp (less reliable than using a token directly).
+# [yandexmusic]
+# enabled = true
+# token = "your-oauth-token-here"
+# cookies_from = "chrome"
+
+# ---
 # NetEase Cloud Music (optional, opt-in)
 # Sign in to music.163.com in your browser, then run `cliamp setup` or set
 # cookies_from manually. The provider lists your account playlists, saved

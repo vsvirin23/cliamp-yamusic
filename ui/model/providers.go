@@ -79,6 +79,8 @@ func providerKeyForShortcut(key string) string {
 		return "yt"
 	case "M":
 		return "netease"
+	case "X":
+		return "yamusic"
 	case "L":
 		return "local"
 	case "R":

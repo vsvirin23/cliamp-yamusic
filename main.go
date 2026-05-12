@@ -18,6 +18,7 @@ import (
 	"cliamp/external/navidrome"
 	"cliamp/external/netease"
 	"cliamp/external/plex"
+	"cliamp/external/yamusic"
 	"cliamp/external/radio"
 	"cliamp/external/soundcloud"
 	"cliamp/external/spotify"
@@ -118,6 +119,17 @@ func run(overrides config.Overrides, positional []string, daemon bool) error {
 			player.SetYTDLCookiesFrom(cfg.NetEase.CookiesFrom)
 		}
 		providers = append(providers, model.ProviderEntry{Key: "netease", Name: "NetEase", Provider: neProv})
+	}
+
+	if ymProv := yamusic.NewFromConfig(yamusic.Config{
+		Enabled:     cfg.YandexMusic.Enabled,
+		Token:       cfg.YandexMusic.Token,
+		CookiesFrom: cfg.YandexMusic.CookiesFrom,
+	}); ymProv != nil {
+		if cfg.YandexMusic.CookiesFrom != "" {
+			player.SetYTDLCookiesFrom(cfg.YandexMusic.CookiesFrom)
+		}
+		providers = append(providers, model.ProviderEntry{Key: "yamusic", Name: "Yandex Music", Provider: ymProv})
 	}
 
 	var ytProviders ytmusic.Providers

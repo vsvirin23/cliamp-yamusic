@@ -31,8 +31,9 @@ type SortType struct {
 
 // ProviderMeta key constants used across providers and the UI.
 const (
-	MetaNavidromeID = "navidrome.id"
-	MetaJellyfinID  = "jellyfin.id"
-	MetaEmbyID      = "emby.id"
-	MetaNetEaseID   = "netease.id"
+	MetaNavidromeID   = "navidrome.id"
+	MetaJellyfinID    = "jellyfin.id"
+	MetaEmbyID        = "emby.id"
+	MetaNetEaseID     = "netease.id"
+	MetaYandexMusicID = "yamusic.id"
 )

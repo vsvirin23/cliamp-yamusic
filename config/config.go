@@ -159,6 +159,18 @@ type SoundCloudConfig struct {
 // IsSet reports whether the SoundCloud provider should be shown.
 func (s SoundCloudConfig) IsSet() bool { return s.Enabled }
 
+// YandexMusicConfig holds settings for the Yandex Music provider.
+// Requires a Yandex Music OAuth access token obtained via browser extension
+// or yt-dlp cookie extraction.
+type YandexMusicConfig struct {
+	Enabled     bool   // true only when user explicitly sets enabled = true
+	Token       string // Yandex Music OAuth access token
+	CookiesFrom string // browser name for yt-dlp --cookies-from-browser (e.g. "chrome", "firefox")
+}
+
+// IsSet reports whether the Yandex Music provider should be shown.
+func (y YandexMusicConfig) IsSet() bool { return y.Enabled && (y.Token != "" || y.CookiesFrom != "") }
+
 // NetEaseConfig holds settings for the NetEase Cloud Music provider.
 // The provider is opt-in and can reuse an existing browser session through
 // yt-dlp's --cookies-from-browser support.
@@ -227,7 +239,7 @@ type Config struct {
 	Speed            float64                      // playback speed ratio: 0.25–2.0 (default 1.0)
 	AutoPlay         bool                         // start playback automatically on launch (radio streams, CLI tracks)
 	SeekStepLarge    int                          // seconds for Shift+Left/Right seek jumps
-	Provider         string                       // default provider: "radio", "navidrome", "spotify", "plex", "jellyfin", "emby", "soundcloud", "netease", "ytmusic" (default "radio")
+	Provider         string                       // default provider: "radio", "navidrome", "spotify", "plex", "jellyfin", "emby", "soundcloud", "netease", "yandexmusic", "yt" (default "radio")
 	Theme            string                       // theme name, or "" for ANSI default
 	Visualizer       string                       // visualizer mode name, or "" for default (Bars)
 	SampleRate       int                          // output sample rate: 22050, 44100, 48000, 96000, 192000
@@ -246,6 +258,7 @@ type Config struct {
 	Plex             PlexConfig                   // optional Plex Media Server credentials
 	Jellyfin         JellyfinConfig               // optional Jellyfin server credentials
 	Emby             EmbyConfig                   // optional Emby server credentials
+	YandexMusic      YandexMusicConfig            // Yandex Music provider (opt-in via enabled = true, requires token or cookie)
 	SoundCloud       SoundCloudConfig             // SoundCloud provider (opt-in via enabled = true)
 	NetEase          NetEaseConfig                // NetEase Cloud Music provider (opt-in via enabled = true)
 	Plugins          map[string]map[string]string // per-plugin config from [plugins.*] sections
@@ -311,6 +324,8 @@ func Load() (Config, error) {
 				section = "ytmusic" // normalize for key parsing below
 			case "spotify":
 				cfg.Spotify.Enabled = true
+			case "yandexmusic":
+				cfg.YandexMusic.Enabled = true
 			}
 			// Initialize plugin sub-maps for [plugins] and [plugins.*] sections.
 			if section == "plugins" || strings.HasPrefix(section, "plugins.") {
@@ -389,6 +404,15 @@ func Load() (Config, error) {
 				cfg.SoundCloud.User = parseString(val)
 			case "cookies_from":
 				cfg.SoundCloud.CookiesFrom = parseString(val)
+			}
+		case "yandexmusic":
+			switch key {
+			case "enabled":
+				cfg.YandexMusic.Enabled = strings.ToLower(val) == "true"
+			case "token":
+				cfg.YandexMusic.Token = parseString(val)
+			case "cookies_from":
+				cfg.YandexMusic.CookiesFrom = parseString(val)
 			}
 		case "netease":
 			switch key {

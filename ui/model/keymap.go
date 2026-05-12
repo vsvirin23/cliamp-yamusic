@@ -51,6 +51,7 @@ var keymapEntries = []keymapEntry{
 	{key: "Y", action: "Open YouTube provider"},
 	{key: "C", action: "Open SoundCloud provider"},
 	{key: "M", action: "Open NetEase provider"},
+	{key: "X", action: "Open Yandex Music provider"},
 	{key: "J", action: "Open Jellyfin provider"},
 	{key: "E", action: "Open Emby provider"},
 	{key: "Ctrl+J", action: "Jump to time"},

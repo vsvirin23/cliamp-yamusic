@@ -42,6 +42,7 @@ var providerEmptyStateHint = map[string]string{
 	"youtube music":       "Run `cliamp ytmusic-login` to authorize, then refresh.",
 	"ytmusic":             "Run `cliamp ytmusic-login` to authorize, then refresh.",
 	"soundcloud":          "Set [soundcloud] user in config.toml to browse a profile.",
+	"yandex music":       "Set [yandexmusic] token in config.toml.",
 	"netease cloud music": "Run `cliamp setup` and configure NetEase browser cookies.",
 }
 
