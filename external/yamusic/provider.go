@@ -41,6 +41,10 @@ const (
 	apiTimeout    = 15 * time.Second
 	searchLimit   = 20
 	maxTrackRetry = 3
+	// LazyScheme is the URI prefix for lazily-resolved Yandex Music streams.
+	// A StreamerFactory registered in main.go intercepts these URIs and
+	// fetches a fresh signed URL on demand.
+	LazyScheme = "yamusic:stream:"
 )
 
 // ErrNotAuthenticated is returned when no valid token or cookie session is available.
@@ -357,29 +361,62 @@ type likedTrackRef struct {
 }
 
 // likedTracks returns the user's liked tracks.
-// Uses a local disk cache to load instantly when possible.
-// When fetching from the API succeeds, the cache is refreshed.
+// Uses a local disk cache to load track metadata instantly, then resolves
+// streaming URLs concurrently (up to 8 at a time) so startup is fast.
 func (p *Provider) likedTracks(ctx context.Context, token string) ([]playlist.Track, error) {
 	// Try disk cache first.
 	if cached, ok := loadLikedTracksFromCache(); ok {
-		tracks := make([]playlist.Track, len(cached))
-		for i, ct := range cached {
-			tracks[i] = playlist.Track{
-				Path:         ct.Path,
-				Title:        ct.Title,
-				Artist:       ct.Artist,
-				Album:        ct.Album,
-				DurationSecs: ct.DurationSecs,
-				Stream:       true,
-				ProviderMeta: map[string]string{provider.MetaYandexMusicID: ct.YandexID},
-			}
-		}
+		tracks := p.resolveCachedURLs(ctx, token, cached)
 		// Fire-and-forget refresh in the background.
 		go p.refreshLikedTracksCache(token)
 		return tracks, nil
 	}
 
 	return p.fetchLikedTracks(ctx, token)
+}
+
+// resolveCachedURLs resolves streaming URLs for cached tracks concurrently.
+func (p *Provider) resolveCachedURLs(ctx context.Context, token string, cached []cachedTrack) []playlist.Track {
+	type result struct {
+		idx  int
+		path string
+	}
+	ch := make(chan result, len(cached))
+	sem := make(chan struct{}, 32) // 32 concurrent fetches
+
+	for i, ct := range cached {
+		go func(i int, idStr string) {
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			trackID, err := strconv.Atoi(idStr)
+			if err != nil {
+				ch <- result{idx: i}
+				return
+			}
+			url, err := p.getTrackStreamURL(ctx, token, trackID)
+			if err != nil {
+				ch <- result{idx: i}
+				return
+			}
+			ch <- result{idx: i, path: url}
+		}(i, ct.YandexID)
+	}
+
+	tracks := make([]playlist.Track, len(cached))
+	for i := 0; i < len(cached); i++ {
+		r := <-ch
+		ct := cached[r.idx]
+		tracks[r.idx] = playlist.Track{
+			Path:         r.path,
+			Title:        ct.Title,
+			Artist:       ct.Artist,
+			Album:        ct.Album,
+			DurationSecs: ct.DurationSecs,
+			Stream:       r.path != "",
+		}
+	}
+	return tracks
 }
 
 // fetchLikedTracks fetches liked tracks from the API and caches them.
@@ -428,16 +465,16 @@ func (p *Provider) fetchLikedTracks(ctx context.Context, token string) ([]playli
 
 	resolved, err := p.resolveTrackStreams(ctx, token, allTracks)
 	if err == nil && len(resolved) > 0 {
-		// Cache the resolved tracks.
+		// Cache track metadata (not signed URLs — those expire).
 		cache := make([]cachedTrack, len(resolved))
 		for i, t := range resolved {
+			id := t.ProviderMeta[provider.MetaYandexMusicID]
 			cache[i] = cachedTrack{
-				Path:         t.Path,
 				Title:        t.Title,
 				Artist:       t.Artist,
 				Album:        t.Album,
 				DurationSecs: t.DurationSecs,
-				YandexID:     t.ProviderMeta[provider.MetaYandexMusicID],
+				YandexID:     id,
 			}
 		}
 		_ = saveLikedTracksToCache(cache) // best-effort
@@ -675,6 +712,19 @@ func createTrackURL(info *fullDownloadInfo, codec string) string {
 	hashSum := md5.Sum([]byte(trackURL))
 	hashHex := hex.EncodeToString(hashSum[:])
 	return "https://" + info.Host + "/get-" + codec + "/" + hashHex + "/" + info.Ts + info.Path
+}
+
+// GetStreamURL fetches a fresh signed streaming URL for a Yandex Music track ID.
+func (p *Provider) GetStreamURL(trackID int) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), apiTimeout)
+	defer cancel()
+
+	token, err := p.ensureAuth(ctx)
+	if err != nil {
+		return "", err
+	}
+
+	return p.getTrackStreamURL(ctx, token, trackID)
 }
 
 // --- HTTP helpers ---

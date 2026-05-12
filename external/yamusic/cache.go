@@ -23,8 +23,8 @@ type cachedLikedTracks struct {
 }
 
 // cachedTrack is a serializable representation of a liked track for caching.
+// Only metadata is cached — signed streaming URLs expire and are re-resolved.
 type cachedTrack struct {
-	Path         string `json:"path"`
 	Title        string `json:"title"`
 	Artist       string `json:"artist"`
 	Album        string `json:"album"`
