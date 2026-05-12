@@ -1,0 +1,4 @@
+{
+  "signature": "main.go::Unresolved from this turn — main.go:\n🔴 STOP — 1 issue(s) must be fixed:\n  L268: undefined: defaultRadio\n    💡 Fix: LSP quick fixes: Create variable defaultRadio",
+  "sessionId": "lens-mp2opejx-5393a06e"
+}

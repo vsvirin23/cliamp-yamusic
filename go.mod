@@ -11,7 +11,7 @@ require (
 	github.com/gopxl/beep/v2 v2.1.1
 	github.com/jfreymuth/oggvorbis v1.0.5
 	github.com/kkdai/youtube/v2 v2.10.6
-	github.com/madelynnblue/go-dsp v1.0.0
+	github.com/oklookat/yandexauth/v3 v3.0.1
 	github.com/urfave/cli/v3 v3.8.0
 	github.com/yuin/gopher-lua v1.1.2
 	golang.org/x/oauth2 v0.36.0

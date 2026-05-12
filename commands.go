@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"cliamp/cmd"
 	"cliamp/config"
 	"cliamp/external/spotify"
+	"cliamp/external/yamusic"
 	"cliamp/ipc"
 	"cliamp/player"
 	"cliamp/pluginmgr"
@@ -32,7 +34,7 @@ func buildApp() *cli.Command {
 		&cli.BoolFlag{Name: "no-mono", Usage: "disable mono output"},
 		&cli.BoolFlag{Name: "auto-play", Usage: "start playback immediately"},
 		&cli.BoolFlag{Name: "compact", Usage: "compact mode (80 columns)"},
-		&cli.StringFlag{Name: "provider", Usage: "default provider: radio, navidrome, plex, jellyfin, emby, spotify, soundcloud, netease, yt, youtube, ytmusic"},
+		&cli.StringFlag{Name: "provider", Usage: "default provider: radio, navidrome, plex, jellyfin, emby, spotify, soundcloud, netease, yt, youtube, ytmusic, yamusic"},
 		&cli.StringFlag{Name: "start-theme", Usage: "UI theme name"},
 		&cli.StringFlag{Name: "visualizer", Usage: "visualizer mode"},
 		&cli.StringFlag{Name: "eq-preset", Usage: "EQ preset name"},
@@ -88,6 +90,7 @@ func buildApp() *cli.Command {
 			speedCommand(),
 			eqCommand(),
 			deviceCommand(),
+			yamusicCommand(),
 		},
 	}
 }
@@ -149,10 +152,10 @@ func overridesFromFlags(c *cli.Command) (config.Overrides, error) {
 	if c.IsSet("provider") {
 		v := strings.ToLower(c.String("provider"))
 		switch v {
-		case "radio", "navidrome", "spotify", "plex", "jellyfin", "emby", "soundcloud", "netease", "yt", "youtube", "ytmusic":
+		case "radio", "navidrome", "spotify", "plex", "jellyfin", "emby", "soundcloud", "netease", "yt", "youtube", "ytmusic", "yamusic":
 			ov.Provider = &v
 		default:
-			return ov, fmt.Errorf("--provider must be radio, navidrome, spotify, plex, jellyfin, emby, soundcloud, netease, yt, youtube, or ytmusic (got %q)", v)
+			return ov, fmt.Errorf("--provider must be radio, navidrome, spotify, plex, jellyfin, emby, soundcloud, netease, yt, youtube, ytmusic, or yamusic (got %q)", v)
 		}
 	}
 	if c.IsSet("start-theme") {
@@ -839,4 +842,123 @@ func deviceCommand() *cli.Command {
 			return nil
 		},
 	}
+}
+
+func yamusicCommand() *cli.Command {
+	return &cli.Command{
+		Name:  "yamusic",
+		Usage: "manage Yandex Music integration",
+		Commands: []*cli.Command{
+			{
+				Name:  "auth",
+				Usage: "authorize cliamp to access your Yandex Music account",
+				Description: "Runs the Yandex OAuth device-code flow.\n" +
+					"Opens a URL with a code to enter — once you authorize,\n" +
+					"the token is saved to ~/.config/cliamp/config.toml\n" +
+					"in the [yandexmusic] section.",
+				Action: func(ctx context.Context, c *cli.Command) error {
+					token, err := yamusic.RunAuthFlow()
+					if err != nil {
+						return err
+					}
+					if err := saveYamusicToken(token); err != nil {
+						return fmt.Errorf("yamusic: save token: %w", err)
+					}
+					fmt.Println("Token saved to config. Restart cliamp to use Yandex Music.")
+					return nil
+				},
+			},
+		},
+	}
+}
+
+// saveYamusicToken writes the [yandexmusic] section to config.toml,
+// preserving any existing top-level keys and other sections.
+func saveYamusicToken(token string) error {
+	cfgPath, err := configPath()
+	if err != nil {
+		return err
+	}
+
+	header := "[yandexmusic]"
+	block := header + "\nenabled = true\ntoken = " + strconv.Quote(token) + "\n"
+
+	data, err := os.ReadFile(cfgPath)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return err
+		}
+		// Config doesn't exist yet; create it.
+		if err := os.MkdirAll(filepath.Dir(cfgPath), 0o755); err != nil {
+			return err
+		}
+		return os.WriteFile(cfgPath, []byte(block), 0o644)
+	}
+
+	lines := strings.Split(string(data), "\n")
+	target := "[yandexmusic]"
+	start := -1
+	for i, l := range lines {
+		if strings.EqualFold(strings.TrimSpace(l), target) {
+			start = i
+			break
+		}
+	}
+
+	if start < 0 {
+		// Append new section at the end.
+		out := strings.TrimRight(string(data), "\n")
+		if out != "" {
+			out += "\n\n"
+		}
+		out += block
+		return os.WriteFile(cfgPath, []byte(out), 0o644)
+	}
+
+	// Find end of the existing section.
+	end := start + 1
+	for end < len(lines) {
+		t := strings.TrimSpace(lines[end])
+		if strings.HasPrefix(t, "[") && strings.HasSuffix(t, "]") {
+			break
+		}
+		end++
+	}
+
+	before := strings.TrimRight(strings.Join(lines[:start], "\n"), "\n")
+	after := ""
+	if end < len(lines) {
+		after = strings.TrimLeft(strings.Join(lines[end:], "\n"), "\n")
+	}
+	var b strings.Builder
+	if before != "" {
+		b.WriteString(before)
+		b.WriteString("\n\n")
+	}
+	b.WriteString(block)
+	if after != "" {
+		b.WriteString("\n")
+		b.WriteString(after)
+		if !strings.HasSuffix(after, "\n") {
+			b.WriteString("\n")
+		}
+	}
+	return os.WriteFile(cfgPath, []byte(b.String()), 0o644)
+}
+
+// configPath returns the path to cliamp's config.toml.
+func configPath() (string, error) {
+	dir, err := configDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "config.toml"), nil
+}
+
+func configDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".config", "cliamp"), nil
 }

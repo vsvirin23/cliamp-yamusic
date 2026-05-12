@@ -30,6 +30,7 @@ import (
 	"cliamp/external/navidrome"
 	"cliamp/external/netease"
 	"cliamp/external/plex"
+	"cliamp/external/yamusic"
 	"cliamp/internal/appdir"
 )
 
@@ -385,6 +386,50 @@ func providers() []providerSpec {
 				default:
 					return "enabled = true"
 				}
+			},
+		},
+		{
+			key:     "yamusic",
+			name:    "Yandex Music",
+			section: "yandexmusic",
+			intro: []string{
+				"Requires a Yandex Music OAuth token.",
+				"Run 'cliamp yamusic auth' to get one.",
+			},
+			fields: []fieldSpec{
+				{key: "token", label: "OAuth token", secret: true,
+					help: "Obtain via 'cliamp yamusic auth' or browser devtools"},
+				{key: "cookies_from", label: "Cookies from browser (optional)",
+					help: "e.g. chrome, firefox; for yt-dlp cookie extraction"},
+			},
+			validate: func(v map[string]string) error {
+				// Validate token by probing account status.
+				if v["token"] != "" {
+					p := yamusic.NewFromConfig(yamusic.Config{
+						Enabled: true,
+						Token:   v["token"],
+					})
+					if p != nil {
+						_, err := p.Playlists()
+						if err != nil {
+							return fmt.Errorf("yamusic: %w", err)
+						}
+					}
+				}
+				if v["cookies_from"] != "" && v["token"] == "" {
+					return fmt.Errorf("cookie auth not implemented; provide token instead")
+				}
+				return nil
+			},
+			body: func(v map[string]string) string {
+				lines := []string{"enabled = true"}
+				if v["token"] != "" {
+					lines = append(lines, fmt.Sprintf("token        = %q", v["token"]))
+				}
+				if v["cookies_from"] != "" {
+					lines = append(lines, fmt.Sprintf("cookies_from = %q", v["cookies_from"]))
+				}
+				return strings.Join(lines, "\n")
 			},
 		},
 	}

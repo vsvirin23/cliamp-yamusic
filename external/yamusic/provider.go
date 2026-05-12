@@ -37,10 +37,10 @@ var (
 )
 
 const (
-	apiBase        = "https://api.music.yandex.net"
-	apiTimeout     = 15 * time.Second
-	searchLimit    = 20
-	maxTrackRetry  = 3
+	apiBase       = "https://api.music.yandex.net"
+	apiTimeout    = 15 * time.Second
+	searchLimit   = 20
+	maxTrackRetry = 3
 )
 
 // ErrNotAuthenticated is returned when no valid token or cookie session is available.
@@ -58,55 +58,85 @@ func (c Config) IsSet() bool { return c.Enabled && (c.Token != "" || c.CookiesFr
 
 // apiResponse is the generic Yandex Music API response wrapper.
 type apiResponse[T any] struct {
-	Result   T      `json:"result"`
+	Result         T               `json:"result"`
 	InvocationInfo json.RawMessage `json:"invocationInfo"`
-	Error    *struct {
+	Error          *struct {
 		Name    string `json:"name"`
 		Message string `json:"message"`
 	} `json:"error"`
 }
 
+// intOrString handles Yandex Music IDs that arrive as either a JSON number
+// or a JSON string. Implements json.Unmarshaler.
+type intOrString int
+
+func (n *intOrString) UnmarshalJSON(b []byte) error {
+	if len(b) == 0 {
+		return nil
+	}
+	// Try number first.
+	if b[0] >= '0' && b[0] <= '9' || b[0] == '-' {
+		var v int
+		if err := json.Unmarshal(b, &v); err != nil {
+			return err
+		}
+		*n = intOrString(v)
+		return nil
+	}
+	// Try string.
+	var s string
+	if err := json.Unmarshal(b, &s); err != nil {
+		return err
+	}
+	v, err := strconv.Atoi(s)
+	if err != nil {
+		return err
+	}
+	*n = intOrString(v)
+	return nil
+}
+
 // Artist represents a Yandex Music artist in API responses.
 type artist struct {
-	ID   int    `json:"id"`
-	Name string `json:"name"`
+	ID   intOrString `json:"id"`
+	Name string      `json:"name"`
 }
 
 // Album represents a Yandex Music album in API responses.
 type album struct {
-	ID    int    `json:"id"`
-	Title string `json:"title"`
+	ID    intOrString `json:"id"`
+	Title string      `json:"title"`
 }
 
 // track represents a Yandex Music track in API responses.
 type track struct {
-	ID         int      `json:"id"`
-	RealID     int      `json:"realId"`
-	Title      string   `json:"title"`
-	DurationMs int      `json:"durationMs"`
-	FileSize   int      `json:"fileSize"`
-	Artists    []artist `json:"artists"`
-	Albums     []album  `json:"albums"`
-	Available  bool     `json:"available"`
+	ID         intOrString `json:"id"`
+	RealID     intOrString `json:"realId"`
+	Title      string      `json:"title"`
+	DurationMs int         `json:"durationMs"`
+	FileSize   int         `json:"fileSize"`
+	Artists    []artist    `json:"artists"`
+	Albums     []album     `json:"albums"`
+	Available  bool        `json:"available"`
 }
 
 // playlistItem represents a Yandex Music playlist in API responses.
 type playlistItem struct {
-	Kind       int      `json:"kind"`
-	UID        int      `json:"uid"`
-	Title      string   `json:"title"`
-	TrackCount int      `json:"trackCount"`
+	Kind       intOrString `json:"kind"`
+	UID        intOrString `json:"uid"`
+	Title      string      `json:"title"`
+	TrackCount int         `json:"trackCount"`
 	Owner      struct {
-		UID int `json:"uid"`
+		UID intOrString `json:"uid"`
 	} `json:"owner"`
 }
 
 // trackDownloadInfo holds variant info for track download.
 type trackDownloadInfo struct {
-	Codec          string `json:"codec"`
-	BitrateInKbps  int    `json:"bitrateInKbps"`
+	Codec           string `json:"codec"`
+	BitrateInKbps   int    `json:"bitrateInKbps"`
 	DownloadInfoUrl string `json:"downloadInfoUrl"`
-	Direct         bool   `json:"direct"`
+	Direct          bool   `json:"direct"`
 }
 
 // fullDownloadInfo holds the signed download URL parts.
@@ -141,9 +171,9 @@ type Provider struct {
 	playlists []playlist.PlaylistInfo
 }
 
-// NewFromConfig returns a provider, or nil when Yandex Music is not enabled.
+// NewFromConfig returns a provider, or nil when Yandex Music is not enabled/configured.
 func NewFromConfig(cfg Config) *Provider {
-	if !cfg.Enabled {
+	if !cfg.IsSet() {
 		return nil
 	}
 	if cfg.CookiesFrom != "" {
@@ -197,13 +227,13 @@ func (p *Provider) ensureUserID(ctx context.Context) (int, error) {
 
 	var resp apiResponse[struct {
 		Account struct {
-			UID int `json:"uid"`
+			UID intOrString `json:"uid"`
 		} `json:"account"`
 	}]
 	if err := p.apiGet(ctx, "/account/status", nil, token, &resp); err != nil {
 		return 0, err
 	}
-	uid := resp.Result.Account.UID
+	uid := int(resp.Result.Account.UID)
 	if uid == 0 {
 		return 0, ErrNotAuthenticated
 	}
@@ -246,10 +276,10 @@ func (p *Provider) Playlists() ([]playlist.PlaylistInfo, error) {
 		for _, pl := range playlistsResp.Result {
 			name := strings.TrimSpace(pl.Title)
 			if name == "" {
-				name = fmt.Sprintf("Playlist #%d", pl.Kind)
+				name = fmt.Sprintf("Playlist #%d", int(pl.Kind))
 			}
 			infos = append(infos, playlist.PlaylistInfo{
-				ID:         fmt.Sprintf("yamusic:%d:%d", pl.UID, pl.Kind),
+				ID:         fmt.Sprintf("yamusic:%d:%d", int(pl.UID), int(pl.Kind)),
 				Name:       name,
 				TrackCount: pl.TrackCount,
 				Section:    "My Playlists",
@@ -257,12 +287,24 @@ func (p *Provider) Playlists() ([]playlist.PlaylistInfo, error) {
 		}
 	}
 
-	// Add liked tracks as a virtual playlist.
-	infos = append(infos, playlist.PlaylistInfo{
-		ID:      "yamusic:likes",
-		Name:    "Liked Tracks",
-		Section: "Library",
-	})
+	// Virtual playlists.
+	infos = append(infos,
+		playlist.PlaylistInfo{
+			ID:      "yamusic:likes",
+			Name:    "Liked Tracks",
+			Section: "Library",
+		},
+		playlist.PlaylistInfo{
+			ID:      "yamusic:rotor:user:onyourwave",
+			Name:    "Моя волна",
+			Section: "My Wave",
+		},
+		playlist.PlaylistInfo{
+			ID:      "yamusic:rotor:personal:collection",
+			Name:    "Коллекция",
+			Section: "My Wave",
+		},
+	)
 
 	p.mu.Lock()
 	p.playlists = append([]playlist.PlaylistInfo(nil), infos...)
@@ -284,6 +326,10 @@ func (p *Provider) Tracks(playlistID string) ([]playlist.Track, error) {
 	}
 
 	switch {
+	case strings.HasPrefix(playlistID, "yamusic:rotor:"):
+		// Format: yamusic:rotor:{type}:{tag}
+		station := strings.TrimPrefix(playlistID, "yamusic:rotor:")
+		return p.rotorStationTracks(ctx, token, station)
 	case strings.HasPrefix(playlistID, "yamusic:likes"):
 		return p.likedTracks(ctx, token)
 	case strings.HasPrefix(playlistID, "yamusic:search:"):
@@ -303,8 +349,41 @@ func (p *Provider) Tracks(playlistID string) ([]playlist.Track, error) {
 	}
 }
 
+// likedTrackRef is a reference to a liked track returned by the API.
+type likedTrackRef struct {
+	ID        intOrString `json:"id"`
+	AlbumID   intOrString `json:"albumId"`
+	Timestamp string      `json:"timestamp"`
+}
+
 // likedTracks returns the user's liked tracks.
+// Uses a local disk cache to load instantly when possible.
+// When fetching from the API succeeds, the cache is refreshed.
 func (p *Provider) likedTracks(ctx context.Context, token string) ([]playlist.Track, error) {
+	// Try disk cache first.
+	if cached, ok := loadLikedTracksFromCache(); ok {
+		tracks := make([]playlist.Track, len(cached))
+		for i, ct := range cached {
+			tracks[i] = playlist.Track{
+				Path:         ct.Path,
+				Title:        ct.Title,
+				Artist:       ct.Artist,
+				Album:        ct.Album,
+				DurationSecs: ct.DurationSecs,
+				Stream:       true,
+				ProviderMeta: map[string]string{provider.MetaYandexMusicID: ct.YandexID},
+			}
+		}
+		// Fire-and-forget refresh in the background.
+		go p.refreshLikedTracksCache(token)
+		return tracks, nil
+	}
+
+	return p.fetchLikedTracks(ctx, token)
+}
+
+// fetchLikedTracks fetches liked tracks from the API and caches them.
+func (p *Provider) fetchLikedTracks(ctx context.Context, token string) ([]playlist.Track, error) {
 	uid, err := p.ensureUserID(ctx)
 	if err != nil {
 		return nil, err
@@ -312,14 +391,97 @@ func (p *Provider) likedTracks(ctx context.Context, token string) ([]playlist.Tr
 
 	var resp apiResponse[struct {
 		Library struct {
-			Tracks []track `json:"tracks"`
+			Tracks []likedTrackRef `json:"tracks"`
 		} `json:"library"`
 	}]
 	if err := p.apiGet(ctx, fmt.Sprintf("/users/%d/likes/tracks", uid), nil, token, &resp); err != nil {
 		return nil, err
 	}
 
-	return p.resolveTrackStreams(ctx, token, resp.Result.Library.Tracks)
+	refs := resp.Result.Library.Tracks
+	if len(refs) == 0 {
+		return nil, nil
+	}
+
+	// Fetch track metadata by IDs.
+	ids := make([]string, len(refs))
+	for i, ref := range refs {
+		ids[i] = strconv.Itoa(int(ref.ID))
+	}
+
+	// The API accepts comma-separated IDs via track-ids query parameter (used
+	// in playlistTracks). For likes we batch in chunks of 100.
+	const batchSize = 100
+	var allTracks []track
+	for i := 0; i < len(ids); i += batchSize {
+		end := i + batchSize
+		if end > len(ids) {
+			end = len(ids)
+		}
+		batch := ids[i:end]
+		var batchResp apiResponse[[]track]
+		if err := p.apiGet(ctx, "/tracks", url.Values{"track-ids": {strings.Join(batch, ",")}}, token, &batchResp); err != nil {
+			return nil, err
+		}
+		allTracks = append(allTracks, batchResp.Result...)
+	}
+
+	resolved, err := p.resolveTrackStreams(ctx, token, allTracks)
+	if err == nil && len(resolved) > 0 {
+		// Cache the resolved tracks.
+		cache := make([]cachedTrack, len(resolved))
+		for i, t := range resolved {
+			cache[i] = cachedTrack{
+				Path:         t.Path,
+				Title:        t.Title,
+				Artist:       t.Artist,
+				Album:        t.Album,
+				DurationSecs: t.DurationSecs,
+				YandexID:     t.ProviderMeta[provider.MetaYandexMusicID],
+			}
+		}
+		_ = saveLikedTracksToCache(cache) // best-effort
+	}
+
+	return resolved, err
+}
+
+// refreshLikedTracksCache fetches tracks in the background and updates the cache.
+func (p *Provider) refreshLikedTracksCache(token string) {
+	ctx, cancel := context.WithTimeout(context.Background(), apiTimeout)
+	defer cancel()
+	_, _ = p.fetchLikedTracks(ctx, token)
+}
+
+// rotorStationTracks fetches tracks from a Yandex Music rotor station.
+// station is "type:tag" e.g. "user:onyourwave" or "personal:collection".
+// Returns up to 5 tracks per page (rotor stations don't have a fixed track list).
+func (p *Provider) rotorStationTracks(ctx context.Context, token string, station string) ([]playlist.Track, error) {
+	var resp struct {
+		Result struct {
+			Sequence []struct {
+				Track track `json:"track"`
+			} `json:"sequence"`
+		} `json:"result"`
+	}
+	if err := p.apiGetRaw(ctx, "/rotor/station/"+station+"/tracks?page=0", nil, token, &resp); err != nil {
+		return nil, err
+	}
+
+	var tracks []track
+	for _, seq := range resp.Result.Sequence {
+		t := seq.Track
+		if t.ID == 0 || !t.Available {
+			continue
+		}
+		tracks = append(tracks, t)
+	}
+
+	if len(tracks) == 0 {
+		return nil, nil
+	}
+
+	return p.resolveTrackStreams(ctx, token, tracks)
 }
 
 // playlistTracks returns the tracks in a specific playlist.
@@ -331,8 +493,8 @@ func (p *Provider) playlistTracks(ctx context.Context, token string, kind int) (
 
 	// Get playlist with track IDs.
 	type trackRef struct {
-		ID      int `json:"id"`
-		AlbumID int `json:"albumId"`
+		ID      intOrString `json:"id"`
+		AlbumID intOrString `json:"albumId"`
 	}
 	var rawResp struct {
 		Result struct {
@@ -350,7 +512,7 @@ func (p *Provider) playlistTracks(ctx context.Context, token string, kind int) (
 	// Fetch track metadata by IDs.
 	ids := make([]string, len(rawResp.Result.Tracks))
 	for i, t := range rawResp.Result.Tracks {
-		ids[i] = strconv.Itoa(t.ID)
+		ids[i] = strconv.Itoa(int(t.ID))
 	}
 
 	var tracksResp apiResponse[[]track]
@@ -365,9 +527,9 @@ func (p *Provider) playlistTracks(ctx context.Context, token string, kind int) (
 func (p *Provider) searchTracks(ctx context.Context, token, query string, limit int) ([]playlist.Track, error) {
 	var searchResp apiResponse[searchResult]
 	params := url.Values{
-		"text":     {query},
-		"type":     {"track"},
-		"page":     {"0"},
+		"text": {query},
+		"type": {"track"},
+		"page": {"0"},
 	}
 	if limit > 0 {
 		params.Set("page-size", strconv.Itoa(limit))
@@ -411,7 +573,7 @@ func (p *Provider) resolveTrackStreams(ctx context.Context, token string, tracks
 		}
 
 		// Get track download info.
-		streamURL, err := p.getTrackStreamURL(ctx, token, t.ID)
+		streamURL, err := p.getTrackStreamURL(ctx, token, int(t.ID))
 		if err != nil {
 			// Skip tracks we can't stream.
 			continue
@@ -437,7 +599,7 @@ func (p *Provider) resolveTrackStreams(ctx context.Context, token string, tracks
 			Album:        album,
 			Stream:       true,
 			DurationSecs: (t.DurationMs + 999) / 1000,
-			ProviderMeta: map[string]string{provider.MetaYandexMusicID: strconv.Itoa(t.ID)},
+			ProviderMeta: map[string]string{provider.MetaYandexMusicID: strconv.Itoa(int(t.ID))},
 		})
 	}
 
@@ -615,5 +777,3 @@ func (p *Provider) httpBody(ctx context.Context, urlStr, token string) ([]byte, 
 	body, err := io.ReadAll(resp.Body)
 	return body, err
 }
-
-
