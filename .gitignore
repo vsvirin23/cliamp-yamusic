@@ -9,3 +9,4 @@ docs/ideas.md
 /plugins.md
 .worktrees/
 config.backup.toml
+.pi-lens/
