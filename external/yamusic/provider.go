@@ -291,12 +291,18 @@ func (p *Provider) Playlists() ([]playlist.PlaylistInfo, error) {
 		}
 	}
 
+	likedCount := 0
+	if cached, ok := loadLikedTracksFromCache(); ok {
+		likedCount = len(cached)
+	}
+
 	// Virtual playlists.
 	infos = append(infos,
 		playlist.PlaylistInfo{
-			ID:      "yamusic:likes",
-			Name:    "Liked Tracks",
-			Section: "Library",
+			ID:         "yamusic:likes",
+			Name:       "Liked Tracks",
+			TrackCount: likedCount,
+			Section:    "Library",
 		},
 		playlist.PlaylistInfo{
 			ID:      "yamusic:rotor:user:onyourwave",
@@ -382,7 +388,7 @@ func (p *Provider) resolveCachedURLs(ctx context.Context, token string, cached [
 		path string
 	}
 	ch := make(chan result, len(cached))
-	sem := make(chan struct{}, 32) // 32 concurrent fetches
+	sem := make(chan struct{}, 8) // 8 concurrent fetches
 
 	for i, ct := range cached {
 		go func(i int, idStr string) {
@@ -601,42 +607,65 @@ func (p *Provider) SearchTracks(_ context.Context, query string, limit int) ([]p
 
 // resolveTrackStreams fetches download info for each track and converts to
 // cliamp tracks with signed streaming URLs as Path.
+type streamResult struct {
+	idx    int
+	path   string
+	title  string
+	artist string
+	album  string
+	dur    int
+	meta   string
+}
+
 func (p *Provider) resolveTrackStreams(ctx context.Context, token string, tracks []track) ([]playlist.Track, error) {
-	var result []playlist.Track
+	ch := make(chan streamResult, len(tracks))
+	sem := make(chan struct{}, 8)
 
-	for _, t := range tracks {
+	for i, t := range tracks {
 		if t.ID == 0 || !t.Available {
+			ch <- streamResult{idx: i}
 			continue
 		}
 
-		// Get track download info.
-		streamURL, err := p.getTrackStreamURL(ctx, token, int(t.ID))
-		if err != nil {
-			// Skip tracks we can't stream.
-			continue
-		}
+		go func(i int, t track) {
+			sem <- struct{}{}
+			defer func() { <-sem }()
 
-		artist := ""
-		if len(t.Artists) > 0 {
-			names := make([]string, len(t.Artists))
-			for i, a := range t.Artists {
-				names[i] = a.Name
+			url, err := p.getTrackStreamURL(ctx, token, int(t.ID))
+			r := streamResult{idx: i, dur: (t.DurationMs + 999) / 1000}
+			if err == nil {
+				r.path = url
 			}
-			artist = strings.Join(names, ", ")
-		}
-		album := ""
-		if len(t.Albums) > 0 {
-			album = t.Albums[0].Title
-		}
+			r.title = t.Title
+			if len(t.Artists) > 0 {
+				names := make([]string, len(t.Artists))
+				for j, a := range t.Artists {
+					names[j] = a.Name
+				}
+				r.artist = strings.Join(names, ", ")
+			}
+			if len(t.Albums) > 0 {
+				r.album = t.Albums[0].Title
+			}
+			r.meta = strconv.Itoa(int(t.ID))
+			ch <- r
+		}(i, t)
+	}
 
+	result := make([]playlist.Track, 0, len(tracks))
+	for i := 0; i < len(tracks); i++ {
+		r := <-ch
+		if r.path == "" {
+			continue
+		}
 		result = append(result, playlist.Track{
-			Path:         streamURL,
-			Title:        t.Title,
-			Artist:       artist,
-			Album:        album,
+			Path:         r.path,
+			Title:        r.title,
+			Artist:       r.artist,
+			Album:        r.album,
 			Stream:       true,
-			DurationSecs: (t.DurationMs + 999) / 1000,
-			ProviderMeta: map[string]string{provider.MetaYandexMusicID: strconv.Itoa(int(t.ID))},
+			DurationSecs: r.dur,
+			ProviderMeta: map[string]string{provider.MetaYandexMusicID: r.meta},
 		})
 	}
 
